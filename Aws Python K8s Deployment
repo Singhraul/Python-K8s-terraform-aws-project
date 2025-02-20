@@ -1,0 +1,115 @@
+# Full Deployment of a Python Application on AWS using Terraform & Kubernetes
+
+## **1. Terraform - Infrastructure as Code (IaC)**
+### **Terraform Configuration for AWS EKS, Load Balancer & Auto Scaling Group**
+```hcl
+provider "aws" {
+  region = "us-east-1"
+}
+
+resource "aws_vpc" "my_vpc" {
+  cidr_block = "10.0.0.0/16"
+}
+
+resource "aws_subnet" "subnet1" {
+  vpc_id     = aws_vpc.my_vpc.id
+  cidr_block = "10.0.1.0/24"
+  availability_zone = "us-east-1a"
+}
+
+resource "aws_eks_cluster" "my_eks" {
+  name     = "my-cluster"
+  role_arn = aws_iam_role.eks_role.arn
+  vpc_config {
+    subnet_ids = [aws_subnet.subnet1.id]
+  }
+}
+
+resource "aws_autoscaling_group" "eks_asg" {
+  vpc_zone_identifier = [aws_subnet.subnet1.id]
+  desired_capacity    = 2
+  max_size           = 5
+  min_size           = 1
+  launch_configuration = aws_launch_configuration.eks_launch_config.id
+}
+
+resource "aws_launch_configuration" "eks_launch_config" {
+  image_id        = "ami-12345678"
+  instance_type   = "t3.medium"
+  key_name        = "my-key"
+}
+
+resource "aws_lb" "eks_lb" {
+  name               = "eks-load-balancer"
+  internal           = false
+  load_balancer_type = "application"
+  security_groups    = [aws_security_group.lb_sg.id]
+  subnets            = [aws_subnet.subnet1.id]
+}
+```
+
+---
+
+## **2. Kubernetes Deployment & Service**
+### **Deployment YAML for Python Application**
+```yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: python-app
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: python-app
+  template:
+    metadata:
+      labels:
+        app: python-app
+    spec:
+      containers:
+        - name: python-container
+          image: my-python-app:latest
+          ports:
+            - containerPort: 5000
+```
+
+### **Service to Expose the Application with Load Balancer**
+```yaml
+apiVersion: v1
+kind: Service
+metadata:
+  name: python-app-service
+spec:
+  selector:
+    app: python-app
+  ports:
+    - protocol: TCP
+      port: 80
+      targetPort: 5000
+  type: LoadBalancer
+  annotations:
+    service.beta.kubernetes.io/aws-load-balancer-type: "alb"
+```
+
+---
+
+## **3. Shell Script for Deployment Automation**
+### **Deploying Kubernetes Objects & Terraform**
+```bash
+#!/bin/bash
+
+# Initialize Terraform
+terraform init
+terraform apply -auto-approve
+
+# Configure Kubeconfig for EKS
+aws eks update-kubeconfig --region us-east-1 --name my-cluster
+
+# Deploy Kubernetes Resources
+kubectl apply -f deployment.yaml
+kubectl apply -f service.yaml
+
+# Verify Deployment
+kubectl get pods
+kubectl get svc
